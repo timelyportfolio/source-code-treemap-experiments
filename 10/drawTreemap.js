@@ -205,7 +205,7 @@ function main(o, data) {
     t.call(text);
 
     g.selectAll('rect')
-      .style('fill', d => color(d.key));
+      .style('fill', d => color(d.data.key));
 
     function transition(d) {
       if (transitioning || !d) return;
