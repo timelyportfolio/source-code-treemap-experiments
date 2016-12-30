@@ -33,29 +33,25 @@ function main(o, data) {
 
   const x = d3.scaleLinear()
     .domain([0, width])
-    .range([0, width]);
+    .range([0, width])
+    .clamp(true);
 
   const y = d3.scaleLinear()
     .domain([0, height])
-    .range([0, height]);
+    .range([0, height])
+    .clamp(true);
 
-  const treemap = d3.treemap()
-    .size([width, height])
-    .padding(false)
-    .padding(1);
-
-  console.log('treemap()', treemap());
-
-  // const hierarchy = d3.hierarchy()
-  //   .children((d, depth) => {
-  //     if (depth) {
-  //       return null;
-  //     }
-  //     return d._children;
-  //   })
-  //   .sort((a, b) => a.value - b.value)
-  //   .ratio(height / (width * 0.5 * (1 + Math.sqrt(5))))
-  //   .round(false);
+  // to apply treemap data should be a d3.hierarchy or treemap will fail
+  //console.log('treemap()', treemap());
+  
+  // see https://github.com/d3/d3-hierarchy/issues/30
+  //  children function in d3v4 is supplied as the second argument
+ const hierarchy = d3.hierarchy(
+    data,
+    d => d.values
+  )
+    .sort((a, b) => a.value - b.value)
+    .sum(d => d.value);
 
   const svg = d3.select('#chart').append('svg')
     .attr('width', width + margin.left + margin.right)
@@ -96,11 +92,14 @@ function main(o, data) {
     root = data;
   }
 
-  initialize(root);
-  accumulate(root);
-  layout(root);
-  console.log(root);
-  display(root);
+  debugger;
+  initialize(hierarchy);
+  //initialize(root);
+  //d3.hierachy().sum now handles accumulate
+  //accumulate(root);
+  layout(hierarchy);
+  console.log(hierarchy);
+  display(hierarchy);
 
   if (window.parent !== window) {
     const myheight = document.documentElement.scrollHeight || document.body.scrollHeight;
@@ -111,9 +110,11 @@ function main(o, data) {
     root.x = root.y = 0;
     root.dx = width;
     root.dy = height;
-    root.depth = 0;
+    //root.depth = 0;
   } 
 
+  //  ** this is now handled with d3.hierarchy().sum() ****
+  /*
   // Aggregate the values for internal nodes. This is normally done by the
   // treemap layout, but not here because of our custom implementation.
   // We also take a snapshot of the original children (_children) to avoid
@@ -126,6 +127,7 @@ function main(o, data) {
     }
     return d.value;
   }
+  */
 
   // Compute the treemap layout recursively such that each group of siblings
   // uses the same size (1×1) rather than the dimensions of the parent cell.
@@ -135,14 +137,17 @@ function main(o, data) {
   // of sibling was laid out in 1×1, we must rescale to fit using absolute
   // coordinates. This lets us use a viewport to zoom.
   function layout(d) {
-    if (d._children) {
-      treemap.nodes({ _children: d._children });
-      d._children.forEach((c) => {
-        c.x = d.x + (c.x * d.dx);
-        c.y = d.y + (c.y * d.dy);
-        c.dx *= d.dx;
-        c.dy *= d.dy;
-        c.parent = d;
+    if (d.children) {
+      // treemap will run tile for the entire hierarchy
+      //   we can calculate the layout with the tiling function
+      //   and recurse similar to the original method
+      d3.treemapSquarify.ratio(height / (width * 0.5 * (1 + Math.sqrt(5))))(d,0,0,1,1);
+      d.children.forEach((c) => {
+        c.x = d.x + (c.x0 * d.dx);
+        c.y = d.y + (c.y0 * d.dy);
+        c.dx = (c.x1 - c.x0) * d.dx;
+        c.dy = (c.y1 - c.y0) * d.dy;
+        //c.parent = d;
         layout(c);
       });
     }
@@ -160,15 +165,15 @@ function main(o, data) {
       .attr('class', 'depth');
 
     const g = g1.selectAll('g')
-      .data(d._children)
+      .data(d.children)
       .enter().append('g');
 
-    g.filter(d => d._children)
+    g.filter(d => d.children)
       .classed('children', true)
       .on('click', transition);
 
     const children = g.selectAll('.child')
-      .data(d => d._children || [d])
+      .data(d => d.children || [d])
       .enter().append('g');
 
     children.append('rect')
@@ -179,7 +184,7 @@ function main(o, data) {
 
     children.append('text')
       .attr('class', 'ctext')
-      .text(d => d.key)
+      .text(d => d.data.key)
       .call(text2);
 
     g.append('rect')
@@ -258,15 +263,15 @@ function main(o, data) {
   function rect(rect) {
     rect.attr('x', d => x(d.x))
       .attr('y', d => y(d.y))
-      .attr('width', d => x(d.x + d.dx) - x(d.x))
-      .attr('height', d => y(d.y + d.dy) - y(d.y));
+      .attr('width', d => d3.max([x(d.x + d.dx) - x(d.x),0]))
+      .attr('height', d => d3.max([y(d.y + d.dy) - y(d.y),0]));
   }
 
   function name(d) {
     if (d.parent) {
-      return `${name(d.parent)} / ${d.key} (${formatNumber(d.value)})`;
+      return `${name(d.parent)} / ${d.data.key} (${formatNumber(d.value)})`;
     }
-    return `${d.key} (${formatNumber(d.value)})`;
+    return `${d.data.key} (${formatNumber(d.value)})`;
   }
 
   // a replacement for the jQuery `$.extend(true, {}, objA, objB);`
